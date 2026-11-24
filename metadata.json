@@ -1,0 +1,6 @@
+{
+  "name": "Assam Truck 3D",
+  "description": "3D truck driving simulator across the tea gardens, villages, and highways of Assam.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

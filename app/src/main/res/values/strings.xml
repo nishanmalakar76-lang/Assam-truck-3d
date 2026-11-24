@@ -1,0 +1,30 @@
+<resources>
+    <string name="app_name">Assam Truck 3D</string>
+    <string name="menu_title">ASSAM TRUCK SIMULATOR 3D</string>
+    <string name="menu_subtitle">Drive through the tea gardens, villages and highways of Assam.</string>
+    <string name="menu_disclaimer">Starter edition • Stylized 3D Assam scenery, not a surveyed real-world map.</string>
+    <string name="start_driving">START DRIVING</string>
+    <string name="start_next_mission">START NEXT MISSION</string>
+    <string name="back_to_routes">ROUTE MAP</string>
+    <string name="control_hint">Hold GAS to accelerate • Tap or hold ◀ ▶ to steer</string>
+    <string name="btn_brake">BRAKE</string>
+    <string name="btn_gas">GAS</string>
+    <string name="cd_steer_left">Steer left</string>
+    <string name="cd_steer_right">Steer right</string>
+    <string name="cd_brake">Brake pedal</string>
+    <string name="cd_gas">Gas pedal</string>
+    <string name="cd_pause">Pause trip</string>
+    <string name="cd_camera">Switch camera angle</string>
+    <string name="cd_hero_banner">Assam cargo truck driving past green tea gardens</string>
+    <string name="level_locked">LOCKED</string>
+    <string name="level_select">SELECT</string>
+    <string name="level_selected">SELECTED</string>
+    <string name="mission_complete_title">ARRIVED IN %1$s!</string>
+    <string name="mission_complete_all">ALL ASSAM HIGHWAYS MASTERED!</string>
+    <string name="paused_title">TRIP PAUSED</string>
+    <string name="resume_driving">RESUME DRIVING</string>
+    <string name="restart_route">RESTART ROUTE</string>
+    <string name="out_of_fuel_title">OUT OF DIESEL</string>
+    <string name="out_of_fuel_desc">Your truck ran out of fuel on the highway. Refuel from roadside reserve or restart this route.</string>
+    <string name="refuel_now">REFUEL (₹%1$d)</string>
+</resources>
