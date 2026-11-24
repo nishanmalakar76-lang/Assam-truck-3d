@@ -33,11 +33,13 @@ import androidx.compose.material.icons.rounded.LocalShipping
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Route
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -77,6 +79,7 @@ fun MenuScreen(
   state: DriveHudState,
   onSelectLevel: (Int) -> Unit,
   onStartDriving: () -> Unit,
+  onOpenSettings: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
   val inrFormatter = NumberFormat.getIntegerInstance(Locale("en", "IN"))
@@ -131,6 +134,29 @@ fun MenuScreen(
                 )
               )
           )
+
+          // Top Settings Icon
+          Surface(
+            modifier = Modifier
+              .align(Alignment.TopStart)
+              .padding(12.dp),
+            shape = CircleShape,
+            color = AssamNavyDeep.copy(alpha = 0.86f),
+            border = BorderStroke(1.dp, AssamHudBorder),
+          ) {
+            IconButton(
+              onClick = onOpenSettings,
+              modifier = Modifier
+                .size(48.dp)
+                .testTag("menu_settings_button"),
+            ) {
+              Icon(
+                imageVector = Icons.Rounded.Settings,
+                contentDescription = stringResource(R.string.cd_settings),
+                tint = AssamIvory,
+              )
+            }
+          }
 
           // Top Wallet Badge
           Surface(

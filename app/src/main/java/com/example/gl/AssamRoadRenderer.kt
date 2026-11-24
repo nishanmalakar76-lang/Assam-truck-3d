@@ -4,6 +4,8 @@ import android.opengl.GLES20
 import android.opengl.GLSurfaceView
 import android.opengl.Matrix
 import com.example.model.CameraMode
+import com.example.model.GraphicsQuality
+import com.example.sim.TrafficCarSnapshot
 import com.example.sim.TruckSimulationEngine
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
@@ -27,19 +29,24 @@ class AssamRoadRenderer(
   private val modelMatrix = FloatArray(16)
   private val mvpMatrix = FloatArray(16)
 
+  private val trafficSnapshot = Array(engine.trafficCount()) {
+    TrafficCarSnapshot(0f, 0f, 1f, 1f, 1f)
+  }
+
   private var lastFrameNs: Long = 0L
 
   private data class TreeSpec(val x: Float, val baseZ: Float, val scale: Float)
   private data class BushSpec(val x: Float, val baseZ: Float, val scale: Float)
   private data class HouseSpec(val x: Float, val baseZ: Float, val yaw: Float)
 
+  // Keep right-side trees & houses beyond x >= 18f so they stay clear of the railway track at x = 14.1f
   private val trees = buildList {
     for (i in 0 until 18) {
       val z = -220f + i * 13.5f
       val jitterL = ((i * 37) % 10) * 0.55f
       val jitterR = ((i * 53) % 10) * 0.55f
       add(TreeSpec(-10.5f - jitterL, z, 0.85f + ((i * 19) % 5) * 0.11f))
-      add(TreeSpec(10.5f + jitterR, z + 6.2f, 0.85f + ((i * 29) % 5) * 0.11f))
+      add(TreeSpec(18.2f + jitterR, z + 6.2f, 0.85f + ((i * 29) % 5) * 0.11f))
     }
   }
 
@@ -55,13 +62,13 @@ class AssamRoadRenderer(
 
   private val houses = listOf(
     HouseSpec(-15.5f, -35f, 8f),
-    HouseSpec(16.0f, -95f, -10f),
+    HouseSpec(20.5f, -95f, -10f),
     HouseSpec(-16.5f, -155f, 5f),
-    HouseSpec(15.2f, -205f, -6f),
+    HouseSpec(20.0f, -205f, -6f),
   )
 
   override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
-    GLES20.glClearColor(0.529f, 0.808f, 0.922f, 1.0f) // #87CEEB sunny Assam sky
+    GLES20.glClearColor(0.529f, 0.808f, 0.922f, 1.0f)
     GLES20.glEnable(GLES20.GL_DEPTH_TEST)
     GLES20.glEnable(GLES20.GL_CULL_FACE)
     GLES20.glCullFace(GLES20.GL_BACK)
@@ -89,6 +96,7 @@ class AssamRoadRenderer(
     lastFrameNs = now
 
     engine.step(dt)
+    engine.copyTrafficSnapshot(trafficSnapshot)
 
     GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
     shader.use()
@@ -101,20 +109,23 @@ class AssamRoadRenderer(
     val steer = engine.steerInput
     val wheelSpinDeg = engine.wheelSpinRadians * (180f / PI.toFloat())
     val isBraking = engine.brakePressed.get()
+    val camDist = engine.cameraDistance.coerceIn(9f, 24f)
+    val quality = engine.graphicsQuality
 
     when (engine.cameraMode) {
       CameraMode.CHASE -> {
+        val eyeY = 4.2f + camDist * 0.14f
         Matrix.setLookAtM(
           viewMatrix, 0,
-          camX, 5.8f, 12.2f,
-          truckX * 0.82f, 1.6f, -14f,
+          camX, eyeY, camDist,
+          truckX * 0.82f, 1.5f, -14f,
           0f, 1f, 0f,
         )
       }
       CameraMode.CLOSE -> {
         Matrix.setLookAtM(
           viewMatrix, 0,
-          camX * 0.9f, 4.1f, 8.6f,
+          camX * 0.9f, 4.1f, (camDist * 0.68f).coerceAtLeast(7.2f),
           truckX, 1.5f, -15f,
           0f, 1f, 0f,
         )
@@ -122,7 +133,7 @@ class AssamRoadRenderer(
       CameraMode.HIGH -> {
         Matrix.setLookAtM(
           viewMatrix, 0,
-          camX * 0.6f, 10.5f, 15.5f,
+          camX * 0.6f, 10.5f, camDist + 3.5f,
           truckX * 0.5f, 1.0f, -16f,
           0f, 1f, 0f,
         )
@@ -136,86 +147,154 @@ class AssamRoadRenderer(
       planeMesh,
       0f, -0.14f, -80f,
       520f, 1f, 520f,
-      0.224f, 0.482f, 0.208f, // #397B35
+      0.224f, 0.482f, 0.208f,
     )
-    // Gentle distant Brahmaputra valley hills on the horizon
-    drawMesh(sphereMesh, -75f, -2f, -210f, 130f, 34f, 60f, 0.20f, 0.44f, 0.30f)
-    drawMesh(sphereMesh, 82f, -3f, -215f, 145f, 38f, 65f, 0.18f, 0.42f, 0.29f)
+    if (quality != GraphicsQuality.LOW) {
+      drawMesh(sphereMesh, -75f, -2f, -210f, 130f, 34f, 60f, 0.20f, 0.44f, 0.30f)
+      drawMesh(sphereMesh, 82f, -3f, -215f, 145f, 38f, 65f, 0.18f, 0.42f, 0.29f)
+    }
 
-    // 2. Two-lane asphalt highway (#33383D)
+    // 2. Two-lane asphalt highway
     drawMesh(
       planeMesh,
       0f, 0f, -95f,
       12f, 1f, 360f,
       0.200f, 0.220f, 0.239f,
     )
-    // Continuous white edge lines
     drawMesh(boxMesh, -5.85f, 0.025f, -95f, 0.18f, 0.04f, 360f, 0.94f, 0.95f, 0.96f, unlit = true)
     drawMesh(boxMesh, 5.85f, 0.025f, -95f, 0.18f, 0.04f, 360f, 0.94f, 0.95f, 0.96f, unlit = true)
 
-    // 3. Scrolling center dashed lane dividers (every 12m over 240m loop)
+    // 3. Scrolling center dashed lane dividers
     for (i in 0 until 20) {
       val z = wrapZ(-210f + i * 12f, scrollZ)
       drawMesh(boxMesh, 0f, 0.03f, z, 0.20f, 0.035f, 4.8f, 0.98f, 0.98f, 0.96f, unlit = true)
     }
 
-    // 4. Scrolling milestone KM posts
+    // 4. Parallel railway track (rails + sleepers) on the right side (x = 13.5..14.4)
+    drawMesh(boxMesh, 13.5f, 0.08f, -95f, 0.12f, 0.12f, 360f, 0.333f, 0.345f, 0.353f)
+    drawMesh(boxMesh, 14.4f, 0.08f, -95f, 0.12f, 0.12f, 360f, 0.333f, 0.345f, 0.353f)
+    val sleeperStep = when (quality) {
+      GraphicsQuality.HIGH -> 1
+      GraphicsQuality.MEDIUM -> 2
+      GraphicsQuality.LOW -> 3
+    }
+    for (i in 0 until 60 step sleeperStep) {
+      val z = wrapZ(-210f + i * 4.0f, scrollZ)
+      drawMesh(boxMesh, 13.95f, 0.02f, z, 1.55f, 0.10f, 0.36f, 0.349f, 0.271f, 0.184f)
+    }
+
+    // 5. Stylized Assam passenger/freight train running along the parallel railway
+    drawTrain(13.95f, engine.trainZ)
+
+    // 6. Milestone KM posts
     for (i in 0 until 4) {
       val z = wrapZ(-200f + i * 60f, scrollZ)
       drawMesh(boxMesh, 6.7f, 0.5f, z, 0.32f, 1.0f, 0.22f, 0.95f, 0.95f, 0.95f)
       drawMesh(boxMesh, 6.7f, 0.85f, z, 0.34f, 0.32f, 0.24f, 0.95f, 0.72f, 0.12f)
     }
 
-    // 5. Scrolling Assam tea bushes along both sides of the highway
-    for (bush in teaBushes) {
+    // 7. Assam tea bushes (scaled by graphics quality)
+    val bushStep = when (quality) {
+      GraphicsQuality.HIGH -> 1
+      GraphicsQuality.MEDIUM -> 2
+      GraphicsQuality.LOW -> 3
+    }
+    for (i in teaBushes.indices step bushStep) {
+      val bush = teaBushes[i]
       val z = wrapZ(bush.baseZ, scrollZ)
       drawMesh(
         sphereMesh,
         bush.x, 0.30f * bush.scale, z,
         1.25f * bush.scale, 0.68f * bush.scale, 1.55f * bush.scale,
-        0.184f, 0.545f, 0.235f, // #2F8B3C
+        0.184f, 0.545f, 0.235f,
       )
     }
 
-    // 6. Scrolling roadside trees
-    for (tree in trees) {
+    // 8. Roadside trees
+    val treeStep = if (quality == GraphicsQuality.LOW) 2 else 1
+    for (i in trees.indices step treeStep) {
+      val tree = trees[i]
       val z = wrapZ(tree.baseZ, scrollZ)
       val s = tree.scale
       drawMesh(
         cylinderMesh,
         tree.x, 1.0f * s, z,
         0.44f * s, 2.0f * s, 0.44f * s,
-        0.463f, 0.314f, 0.176f, // #76502D
+        0.463f, 0.314f, 0.176f,
       )
       drawMesh(
         sphereMesh,
         tree.x, 2.55f * s, z,
         2.35f * s, 2.65f * s, 2.35f * s,
-        0.137f, 0.420f, 0.176f, // #236B2D
+        0.137f, 0.420f, 0.176f,
       )
     }
 
-    // 7. Scrolling Assamese village houses
+    // 9. Assamese village houses
     for (house in houses) {
       val z = wrapZ(house.baseZ, scrollZ)
       drawHouse(house.x, z, house.yaw)
     }
 
-    // 8. Detailed 3D Assam Cargo Truck
+    // 10. Moving highway traffic cars
+    for (car in trafficSnapshot) {
+      drawTrafficCar(car.x, car.z, car.r, car.g, car.b)
+    }
+
+    // 11. Player's 3D Assam Cargo Truck
     drawTruck(truckX, steer, speed, wheelSpinDeg, isBraking)
   }
 
   private fun wrapZ(baseZ: Float, scrollZ: Float): Float {
     var z = (baseZ + scrollZ + 210f) % 240f
     if (z < 0f) z += 240f
-    return z - 210f // Range: [-210f, +30f]
+    return z - 210f
   }
 
   private fun drawHouse(x: Float, z: Float, yawDeg: Float) {
-    // Mud-ochre walls (#D8B77B)
     drawMesh(boxMesh, x, 0.95f, z, 3.2f, 1.9f, 2.6f, 0.847f, 0.718f, 0.482f, yawDeg = yawDeg)
-    // Sloped terracotta roof (#8D3424)
     drawMesh(roofMesh, x, 2.55f, z, 4.4f, 1.55f, 3.8f, 0.553f, 0.204f, 0.141f, yawDeg = yawDeg)
+  }
+
+  private fun drawTrafficCar(x: Float, z: Float, r: Float, g: Float, b: Float) {
+    // Lower chassis body
+    drawMesh(boxMesh, x, 0.75f, z, 1.8f, 0.8f, 3.0f, r, g, b)
+    // Tinted glass cabin top
+    drawMesh(boxMesh, x, 1.35f, z - 0.15f, 1.45f, 0.68f, 1.45f, 0.616f, 0.847f, 0.929f, unlit = true)
+    // 4 wheels
+    for (wx in floatArrayOf(-0.95f, 0.95f)) {
+      for (wz in floatArrayOf(-0.9f, 0.9f)) {
+        Matrix.setIdentityM(modelMatrix, 0)
+        Matrix.translateM(modelMatrix, 0, x + wx, 0.35f, z + wz)
+        Matrix.rotateM(modelMatrix, 0, 90f, 0f, 0f, 1f)
+        Matrix.scaleM(modelMatrix, 0, 0.58f, 0.20f, 0.58f)
+        Matrix.multiplyMM(mvpMatrix, 0, vpMatrix, 0, modelMatrix, 0)
+        GLES20.glUniformMatrix4fv(shader.uMvpMatrixHandle, 1, false, mvpMatrix, 0)
+        GLES20.glUniformMatrix4fv(shader.uModelMatrixHandle, 1, false, modelMatrix, 0)
+        GLES20.glUniform4f(shader.uColorHandle, 0.125f, 0.145f, 0.165f, 1f)
+        GLES20.glUniform1f(shader.uUnlitHandle, 0f)
+        cylinderMesh.draw(shader)
+      }
+    }
+  }
+
+  private fun drawTrain(x: Float, z: Float) {
+    // Locomotive engine facing -Z (leading at z, coaches trailing toward +Z)
+    drawMesh(boxMesh, x, 1.4f, z, 2.5f, 2.4f, 7.0f, 0.847f, 0.227f, 0.180f) // #D83A2E
+    drawMesh(boxMesh, x, 3.1f, z - 1.5f, 2.2f, 1.4f, 2.4f, 0.941f, 0.741f, 0.196f) // #F0BD32
+    // Headlight on nose
+    drawMesh(boxMesh, x, 1.6f, z - 3.55f, 0.7f, 0.45f, 0.10f, 1f, 0.96f, 0.76f, unlit = true)
+    // 3 passenger coaches trailing behind (+Z)
+    for (i in 0 until 3) {
+      val coachZ = z + 8.2f + i * 8.4f
+      val isOdd = i % 2 == 1
+      val cr = if (isOdd) 0.141f else 0.157f
+      val cg = if (isOdd) 0.404f else 0.490f
+      val cb = if (isOdd) 0.651f else 0.345f
+      drawMesh(boxMesh, x, 1.35f, coachZ, 2.4f, 2.5f, 7.8f, cr, cg, cb)
+      // Coach window stripe
+      drawMesh(boxMesh, x, 1.85f, coachZ, 2.44f, 0.42f, 7.0f, 0.82f, 0.92f, 0.96f, unlit = true)
+    }
   }
 
   private fun drawTruck(
@@ -230,10 +309,8 @@ class AssamRoadRenderer(
     val bodyYawDeg = -steer * 6.5f
     val bounceY = if (speed > 1f) sin(wheelSpinDeg * 0.12f) * 0.025f * speedRatio else 0f
 
-    // Ground contact shadow
     drawMesh(planeMesh, x, 0.04f, 0.4f, 4.1f, 1f, 8.2f, 0.09f, 0.10f, 0.11f, yawDeg = bodyYawDeg)
 
-    // Helper transform around truck center (x, bounceY, 0.5f)
     fun drawTruckPart(
       mesh: GlMesh,
       lx: Float, ly: Float, lz: Float,
@@ -261,44 +338,31 @@ class AssamRoadRenderer(
       mesh.draw(shader)
     }
 
-    // Chassis frame (#20252A)
     drawTruckPart(boxMesh, 0f, 0.72f, 0f, 2.7f, 0.28f, 7.2f, 0.125f, 0.145f, 0.165f)
-
-    // Royal blue cargo box (#174FBD) at rear (+Z)
     drawTruckPart(boxMesh, 0f, 2.25f, 1.35f, 3.35f, 2.35f, 4.9f, 0.090f, 0.310f, 0.741f)
-    // Decorative Assam saffron trim band along cargo box
     drawTruckPart(boxMesh, 0f, 1.38f, 1.35f, 3.40f, 0.24f, 4.94f, 0.98f, 0.76f, 0.18f)
-    // Rear cargo door seam & bumper
     drawTruckPart(boxMesh, 0f, 2.25f, 3.82f, 0.08f, 2.15f, 0.04f, 0.05f, 0.18f, 0.45f)
     drawTruckPart(boxMesh, 0f, 0.68f, 3.85f, 3.35f, 0.26f, 0.22f, 0.15f, 0.17f, 0.19f)
 
-    // Rear tail / brake lights (glow bright red when braking)
     val tailR = if (isBraking) 1.0f else 0.72f
     val tailG = if (isBraking) 0.16f else 0.08f
     drawTruckPart(boxMesh, -1.25f, 0.96f, 3.84f, 0.46f, 0.22f, 0.08f, tailR, tailG, 0.08f, unlit = isBraking)
     drawTruckPart(boxMesh, 1.25f, 0.96f, 3.84f, 0.46f, 0.22f, 0.08f, tailR, tailG, 0.08f, unlit = isBraking)
 
-    // Saffron-gold cab (#E2A52B) at front (-Z)
     drawTruckPart(boxMesh, 0f, 1.95f, -2.25f, 3.05f, 2.15f, 2.15f, 0.886f, 0.647f, 0.169f)
-    // Cab roof visor / carrier bar
     drawTruckPart(boxMesh, 0f, 3.12f, -2.15f, 2.85f, 0.16f, 1.6f, 0.98f, 0.80f, 0.24f)
-    // Tinted sky-blue windshield (#9DD8ED) facing forward (-Z)
     drawTruckPart(boxMesh, 0f, 2.38f, -3.33f, 2.65f, 0.86f, 0.06f, 0.616f, 0.847f, 0.929f, unlit = true)
-    // Cab side windows
     drawTruckPart(boxMesh, -1.53f, 2.38f, -2.35f, 0.05f, 0.78f, 1.15f, 0.35f, 0.56f, 0.68f, unlit = true)
     drawTruckPart(boxMesh, 1.53f, 2.38f, -2.35f, 0.05f, 0.78f, 1.15f, 0.35f, 0.56f, 0.68f, unlit = true)
-    // Front bumper & glowing headlights
     drawTruckPart(boxMesh, 0f, 0.68f, -3.40f, 3.25f, 0.28f, 0.28f, 0.125f, 0.145f, 0.165f)
     drawTruckPart(boxMesh, -1.15f, 1.08f, -3.34f, 0.42f, 0.22f, 0.06f, 1.0f, 0.96f, 0.76f, unlit = true)
     drawTruckPart(boxMesh, 1.15f, 1.08f, -3.34f, 0.42f, 0.22f, 0.06f, 1.0f, 0.96f, 0.76f, unlit = true)
 
-    // 4 spinning wheels (front wheels pivot slightly with steering)
     val wheelXs = floatArrayOf(-1.68f, 1.68f)
     val wheelZs = floatArrayOf(-2.25f, 2.55f)
     for (wx in wheelXs) {
       for (wz in wheelZs) {
         val frontPivot = if (wz < 0f) -steer * 18f else 0f
-        // Rubber tire
         drawTruckPart(
           cylinderMesh,
           wx, 0.58f, wz,
@@ -308,7 +372,6 @@ class AssamRoadRenderer(
           localRotX = wheelSpinDeg,
           localRotZ = 90f,
         )
-        // Silver hubcap
         drawTruckPart(
           cylinderMesh,
           wx + (if (wx < 0f) -0.04f else 0.04f), 0.58f, wz,

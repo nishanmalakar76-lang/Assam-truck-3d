@@ -3,10 +3,12 @@ package com.example.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.example.audio.TruckAudioEngine
 import com.example.data.CareerRepository
 import com.example.model.ASSAM_LEVELS
 import com.example.model.CameraMode
 import com.example.model.DriveHudState
+import com.example.model.GameSettings
 import com.example.sim.TruckSimulationEngine
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -19,12 +21,20 @@ class TruckSimViewModel(
 ) : ViewModel() {
 
   val engine = TruckSimulationEngine()
+  private val audioEngine = TruckAudioEngine()
 
   private val _uiState = MutableStateFlow(DriveHudState())
   val uiState: StateFlow<DriveHudState> = _uiState.asStateFlow()
 
   init {
     engine.onTelemetryTick = { snap ->
+      val currentSettings = _uiState.value.settings
+      audioEngine.updateState(
+        speedKmh = snap.speedKmh,
+        engineActive = engine.isRunning,
+        soundEnabled = currentSettings.soundEnabled,
+        volume = currentSettings.soundVolume,
+      )
       _uiState.update { state ->
         state.copy(
           speedKmh = snap.speedKmh,
@@ -37,11 +47,14 @@ class TruckSimViewModel(
       handleLevelCompleted()
     }
     engine.onOutOfFuel = {
+      syncAudioState()
       _uiState.update { it.copy(isOutOfFuel = true) }
     }
 
     viewModelScope.launch {
       repository.careerProgress.collect { progress ->
+        engine.cameraDistance = progress.settings.cameraDistance
+        engine.graphicsQuality = progress.settings.graphicsQuality
         _uiState.update { state ->
           val clampedSelected = state.selectedLevelIndex.coerceIn(0, progress.unlockedLevel - 1)
           state.copy(
@@ -49,9 +62,11 @@ class TruckSimViewModel(
             money = progress.money,
             totalTripsCompleted = progress.totalTripsCompleted,
             totalKmDriven = progress.totalKmDriven,
+            settings = progress.settings,
             selectedLevelIndex = if (state.isInMenu) clampedSelected else state.selectedLevelIndex,
           )
         }
+        syncAudioState()
       }
     }
   }
@@ -69,10 +84,14 @@ class TruckSimViewModel(
     val level = ASSAM_LEVELS[state.selectedLevelIndex]
     engine.resetForLevel(level.km)
     engine.isRunning = true
+    if (state.settings.soundEnabled) {
+      audioEngine.startIfNeeded()
+    }
     _uiState.update {
       it.copy(
         isInMenu = false,
         isPaused = false,
+        isSettingsOpen = false,
         isLevelComplete = false,
         isOutOfFuel = false,
         speedKmh = 0f,
@@ -82,6 +101,7 @@ class TruckSimViewModel(
         newlyUnlockedLevel = null,
       )
     }
+    syncAudioState()
   }
 
   fun pauseDriving() {
@@ -89,12 +109,14 @@ class TruckSimViewModel(
     engine.isRunning = false
     engine.clearInputs()
     _uiState.update { it.copy(isPaused = true) }
+    syncAudioState()
   }
 
   fun resumeDriving() {
     if (_uiState.value.isInMenu || _uiState.value.isLevelComplete || _uiState.value.isOutOfFuel) return
     engine.isRunning = true
-    _uiState.update { it.copy(isPaused = false) }
+    _uiState.update { it.copy(isPaused = false, isSettingsOpen = false) }
+    syncAudioState()
   }
 
   fun returnToMenu() {
@@ -104,10 +126,54 @@ class TruckSimViewModel(
       it.copy(
         isInMenu = true,
         isPaused = false,
+        isSettingsOpen = false,
         isLevelComplete = false,
         isOutOfFuel = false,
       )
     }
+    syncAudioState()
+  }
+
+  fun openSettings() {
+    val wasRunning = engine.isRunning
+    if (wasRunning) {
+      engine.isRunning = false
+      engine.clearInputs()
+    }
+    _uiState.update { it.copy(isSettingsOpen = true) }
+    syncAudioState()
+  }
+
+  fun saveAndCloseSettings(newSettings: GameSettings) {
+    engine.cameraDistance = newSettings.cameraDistance
+    engine.graphicsQuality = newSettings.graphicsQuality
+    val shouldResume = !_uiState.value.isInMenu &&
+      !_uiState.value.isPaused &&
+      !_uiState.value.isLevelComplete &&
+      !_uiState.value.isOutOfFuel
+    if (shouldResume) {
+      engine.isRunning = true
+    }
+    if (newSettings.soundEnabled) {
+      audioEngine.startIfNeeded()
+    }
+    _uiState.update { it.copy(settings = newSettings, isSettingsOpen = false) }
+    syncAudioState()
+    viewModelScope.launch {
+      repository.saveSettings(newSettings)
+    }
+  }
+
+  fun playHorn() {
+    audioEngine.playHorn()
+  }
+
+  fun setLandscapeLocked(locked: Boolean) {
+    _uiState.update { it.copy(isLandscapeLocked = locked) }
+  }
+
+  fun setAppForeground(foreground: Boolean) {
+    audioEngine.setForeground(foreground)
   }
 
   fun cycleCameraMode() {
@@ -123,11 +189,15 @@ class TruckSimViewModel(
     val nextLevel = ASSAM_LEVELS[nextIndex]
     engine.resetForLevel(nextLevel.km)
     engine.isRunning = true
+    if (state.settings.soundEnabled) {
+      audioEngine.startIfNeeded()
+    }
     _uiState.update {
       it.copy(
         selectedLevelIndex = nextIndex,
         isInMenu = false,
         isPaused = false,
+        isSettingsOpen = false,
         isLevelComplete = false,
         isOutOfFuel = false,
         speedKmh = 0f,
@@ -135,6 +205,7 @@ class TruckSimViewModel(
         travelledKm = 0f,
       )
     }
+    syncAudioState()
   }
 
   fun refuelOnRoadside(cost: Int = 250) {
@@ -144,8 +215,19 @@ class TruckSimViewModel(
         engine.refuelReserve()
         engine.isRunning = true
         _uiState.update { it.copy(isOutOfFuel = false) }
+        syncAudioState()
       }
     }
+  }
+
+  private fun syncAudioState() {
+    val s = _uiState.value.settings
+    audioEngine.updateState(
+      speedKmh = engine.speedKmh,
+      engineActive = engine.isRunning,
+      soundEnabled = s.soundEnabled,
+      volume = s.soundVolume,
+    )
   }
 
   private fun handleLevelCompleted() {
@@ -155,6 +237,7 @@ class TruckSimViewModel(
     val candidateNextUnlocked = (level.index + 2).coerceAtMost(ASSAM_LEVELS.size)
     val newlyUnlocked = if (candidateNextUnlocked > previousUnlocked) candidateNextUnlocked else null
 
+    syncAudioState()
     _uiState.update {
       it.copy(
         isLevelComplete = true,
@@ -170,6 +253,11 @@ class TruckSimViewModel(
         kmDriven = level.km,
       )
     }
+  }
+
+  override fun onCleared() {
+    super.onCleared()
+    audioEngine.release()
   }
 
   class Factory(private val repository: CareerRepository) : ViewModelProvider.Factory {

@@ -28,16 +28,32 @@ enum class CameraMode(val label: String) {
   HIGH("Overhead Cam"),
 }
 
+enum class GraphicsQuality(val label: String, val scale: Float) {
+  HIGH("High", 1.0f),
+  MEDIUM("Medium", 0.7f),
+  LOW("Low", 0.45f),
+}
+
+data class GameSettings(
+  val soundEnabled: Boolean = true,
+  val soundVolume: Float = 0.55f,
+  val cameraDistance: Float = 13f,
+  val graphicsQuality: GraphicsQuality = GraphicsQuality.HIGH,
+)
+
 data class CareerProgress(
   val unlockedLevel: Int = 1,
   val money: Int = 12500,
   val totalTripsCompleted: Int = 0,
   val totalKmDriven: Double = 0.0,
+  val settings: GameSettings = GameSettings(),
 )
 
 data class DriveHudState(
   val isInMenu: Boolean = true,
   val isPaused: Boolean = false,
+  val isSettingsOpen: Boolean = false,
+  val isLandscapeLocked: Boolean = false,
   val isLevelComplete: Boolean = false,
   val isOutOfFuel: Boolean = false,
   val selectedLevelIndex: Int = 0,
@@ -47,6 +63,7 @@ data class DriveHudState(
   val fuelPercent: Float = 100f,
   val travelledKm: Float = 0f,
   val cameraMode: CameraMode = CameraMode.CHASE,
+  val settings: GameSettings = GameSettings(),
   val lastRewardEarned: Int = 0,
   val newlyUnlockedLevel: Int? = null,
   val totalTripsCompleted: Int = 0,

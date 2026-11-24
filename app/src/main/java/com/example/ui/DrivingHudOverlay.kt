@@ -12,6 +12,8 @@ import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -31,6 +33,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.AccountBalanceWallet
+import androidx.compose.material.icons.rounded.Campaign
 import androidx.compose.material.icons.rounded.EmojiEvents
 import androidx.compose.material.icons.rounded.Flag
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
@@ -38,6 +41,8 @@ import androidx.compose.material.icons.rounded.LocalGasStation
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.ScreenRotation
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Videocam
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -48,6 +53,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -92,6 +98,7 @@ import java.text.NumberFormat
 import java.util.Locale
 import kotlin.math.roundToInt
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun DrivingHudOverlay(
   state: DriveHudState,
@@ -102,6 +109,9 @@ fun DrivingHudOverlay(
   onReturnToMenu: () -> Unit,
   onStartNextMission: () -> Unit,
   onCycleCamera: () -> Unit,
+  onOpenSettings: () -> Unit,
+  onToggleRotate: () -> Unit,
+  onHornClick: () -> Unit,
   onRefuel: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
@@ -111,7 +121,6 @@ fun DrivingHudOverlay(
   val speedRounded = state.speedKmh.roundToInt()
   val progressFraction = (state.travelledKm / level.km.toFloat()).coerceIn(0f, 1f)
 
-  // Safety cleanup if driving overlay leaves composition
   DisposableEffect(Unit) {
     onDispose { engine.clearInputs() }
   }
@@ -121,7 +130,7 @@ fun DrivingHudOverlay(
       .fillMaxSize()
       .windowInsetsPadding(WindowInsets.safeDrawing)
   ) {
-    // Top Status Bar & Mission Card
+    // Top Status Bar & Mission + Quick Action Buttons
     Column(
       modifier = Modifier
         .fillMaxWidth()
@@ -162,7 +171,8 @@ fun DrivingHudOverlay(
         // Mission Progress Card
         Surface(
           modifier = Modifier
-            .widthIn(max = 240.dp)
+            .weight(1f, fill = false)
+            .widthIn(max = 220.dp)
             .testTag("hud_mission_card"),
           shape = RoundedCornerShape(12.dp),
           color = AssamHudDark,
@@ -193,8 +203,36 @@ fun DrivingHudOverlay(
           }
         }
 
-        // Camera & Pause Buttons
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Spacer(modifier = Modifier.width(8.dp))
+
+        // Top-right Action Buttons: Settings, Rotate, Horn, Camera, Pause
+        FlowRow(
+          horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
+          verticalArrangement = Arrangement.spacedBy(6.dp),
+          maxItemsInEachRow = 3,
+        ) {
+          SmallActionPill(
+            icon = Icons.Rounded.Settings,
+            label = stringResource(R.string.btn_settings),
+            contentDescription = stringResource(R.string.cd_settings),
+            onClick = onOpenSettings,
+            modifier = Modifier.testTag("hud_settings_button"),
+          )
+          SmallActionPill(
+            icon = Icons.Rounded.ScreenRotation,
+            label = stringResource(R.string.btn_rotate),
+            contentDescription = stringResource(R.string.cd_rotate),
+            highlighted = state.isLandscapeLocked,
+            onClick = onToggleRotate,
+            modifier = Modifier.testTag("hud_rotate_button"),
+          )
+          SmallActionPill(
+            icon = Icons.Rounded.Campaign,
+            label = stringResource(R.string.btn_horn),
+            contentDescription = stringResource(R.string.cd_horn),
+            onClick = onHornClick,
+            modifier = Modifier.testTag("hud_horn_button"),
+          )
           Surface(
             shape = CircleShape,
             color = AssamHudDark,
@@ -235,7 +273,7 @@ fun DrivingHudOverlay(
       }
     }
 
-    // Bottom Driving Cockpit (Speedometer, Hint, Left/Right Steer, Brake/Gas Pedals)
+    // Bottom Driving Cockpit
     Column(
       modifier = Modifier
         .align(Alignment.BottomCenter)
@@ -246,7 +284,6 @@ fun DrivingHudOverlay(
       horizontalAlignment = Alignment.CenterHorizontally,
       verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-      // Speedometer Badge
       SpeedometerDial(
         speedKmh = speedRounded,
         modifier = Modifier.testTag("hud_speedometer"),
@@ -311,7 +348,7 @@ fun DrivingHudOverlay(
           }
         }
 
-        // Right Pedal Cluster (Brake & Gas)
+        // Right Pedal Cluster
         Row(
           horizontalArrangement = Arrangement.spacedBy(10.dp),
           verticalAlignment = Alignment.Bottom,
@@ -358,7 +395,7 @@ fun DrivingHudOverlay(
     }
 
     // Pause Overlay Modal
-    if (state.isPaused && !state.isLevelComplete) {
+    if (state.isPaused && !state.isLevelComplete && !state.isSettingsOpen) {
       OverlayModalCard(title = stringResource(R.string.paused_title)) {
         Text(
           text = "Route: ${level.from} → ${level.to} (${level.km} km)",
@@ -536,6 +573,47 @@ fun DrivingHudOverlay(
           )
         }
       }
+    }
+  }
+}
+
+@Composable
+private fun SmallActionPill(
+  icon: androidx.compose.ui.graphics.vector.ImageVector,
+  label: String,
+  contentDescription: String,
+  onClick: () -> Unit,
+  modifier: Modifier = Modifier,
+  highlighted: Boolean = false,
+) {
+  Surface(
+    onClick = onClick,
+    modifier = modifier
+      .minimumInteractiveComponentSize()
+      .semantics {
+        this.contentDescription = contentDescription
+        this.role = Role.Button
+      },
+    shape = RoundedCornerShape(10.dp),
+    color = if (highlighted) AssamSaffron else AssamHudDark,
+    border = BorderStroke(1.dp, if (highlighted) AssamSaffron else Color.White.copy(alpha = 0.55f)),
+  ) {
+    Row(
+      modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+      Icon(
+        imageVector = icon,
+        contentDescription = null,
+        tint = if (highlighted) AssamSaffronDarkText else AssamIvory,
+        modifier = Modifier.size(16.dp),
+      )
+      Text(
+        text = label,
+        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+        color = if (highlighted) AssamSaffronDarkText else AssamIvory,
+      )
     }
   }
 }

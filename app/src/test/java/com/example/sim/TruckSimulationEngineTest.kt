@@ -62,4 +62,23 @@ class TruckSimulationEngineTest {
     assertFalse("Expected simulation paused on completion", engine.isRunning)
     assertEquals(1f, engine.travelledKm, 0.001f)
   }
+
+  @Test
+  fun trafficAndTrainMoveDuringSimulation() {
+    val engine = TruckSimulationEngine()
+    engine.resetForLevel(distanceKm = 25)
+    val initialTrainZ = engine.trainZ
+    val initialTraffic = Array(engine.trafficCount()) { TrafficCarSnapshot(0f, 0f, 0f, 0f, 0f) }
+    engine.copyTrafficSnapshot(initialTraffic)
+
+    engine.isRunning = true
+    engine.gasPressed.set(true)
+    repeat(30) { engine.step(0.03f) }
+
+    val updatedTraffic = Array(engine.trafficCount()) { TrafficCarSnapshot(0f, 0f, 0f, 0f, 0f) }
+    engine.copyTrafficSnapshot(updatedTraffic)
+
+    assertTrue("Expected train position to update", engine.trainZ != initialTrainZ)
+    assertTrue("Expected traffic car position to update", updatedTraffic[0].z != initialTraffic[0].z)
+  }
 }

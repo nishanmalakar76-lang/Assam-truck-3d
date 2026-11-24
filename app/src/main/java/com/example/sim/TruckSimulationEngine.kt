@@ -1,10 +1,19 @@
 package com.example.sim
 
 import com.example.model.CameraMode
+import com.example.model.GraphicsQuality
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.PI
 import kotlin.math.max
 import kotlin.math.min
+
+data class TrafficCarSnapshot(
+  val x: Float,
+  val z: Float,
+  val r: Float,
+  val g: Float,
+  val b: Float,
+)
 
 data class TelemetrySnapshot(
   val speedKmh: Float,
@@ -18,8 +27,8 @@ data class TelemetrySnapshot(
 )
 
 /**
- * Thread-safe physics engine shared between Compose input controls, ViewModel telemetry,
- * and the 60fps OpenGL ES 2.0 render thread.
+ * Thread-safe physics, traffic, and railway simulation engine shared between Compose input
+ * controls, ViewModel telemetry, and the 60fps OpenGL ES 2.0 render thread.
  */
 class TruckSimulationEngine {
 
@@ -31,6 +40,8 @@ class TruckSimulationEngine {
   @Volatile var isRunning: Boolean = false
   @Volatile var targetDistanceKm: Float = 25f
   @Volatile var cameraMode: CameraMode = CameraMode.CHASE
+  @Volatile var cameraDistance: Float = 13f
+  @Volatile var graphicsQuality: GraphicsQuality = GraphicsQuality.HIGH
 
   @Volatile var speedKmh: Float = 0f
     private set
@@ -48,6 +59,28 @@ class TruckSimulationEngine {
     private set
   @Volatile var cameraX: Float = 0f
     private set
+  @Volatile var trainZ: Float = 45f
+    private set
+
+  private class MutableTrafficCar(
+    val x: Float,
+    var z: Float,
+    val r: Float,
+    val g: Float,
+    val b: Float,
+    val dirSign: Float,
+  )
+
+  private val traffic = listOf(
+    MutableTrafficCar(-2.8f, -35f, 0.784f, 0.196f, 0.196f, 1f),  // Red 0xC83232
+    MutableTrafficCar(2.8f, -95f, 0.945f, 0.945f, 0.945f, -1f),  // White 0xF1F1F1
+    MutableTrafficCar(-2.8f, -155f, 0.153f, 0.459f, 0.788f, 1f), // Blue 0x2775C9
+    MutableTrafficCar(2.8f, -15f, 0.839f, 0.647f, 0.169f, -1f),  // Gold 0xD6A52B
+  )
+
+  private val trafficRenderBuffer = Array(traffic.size) {
+    TrafficCarSnapshot(traffic[it].x, traffic[it].z, traffic[it].r, traffic[it].g, traffic[it].b)
+  }
 
   private val stateLock = Any()
   private var lastHudEmitNs: Long = 0L
@@ -58,6 +91,17 @@ class TruckSimulationEngine {
 
   private var completionFired = false
   private var outOfFuelFired = false
+
+  fun copyTrafficSnapshot(out: Array<TrafficCarSnapshot>) {
+    synchronized(stateLock) {
+      for (i in traffic.indices) {
+        val c = traffic[i]
+        out[i] = TrafficCarSnapshot(c.x, c.z, c.r, c.g, c.b)
+      }
+    }
+  }
+
+  fun trafficCount(): Int = traffic.size
 
   fun resetForLevel(distanceKm: Int) {
     synchronized(stateLock) {
@@ -70,6 +114,11 @@ class TruckSimulationEngine {
       steerInput = 0f
       worldScrollZ = 0f
       wheelSpinRadians = 0f
+      traffic[0].z = -35f
+      traffic[1].z = -95f
+      traffic[2].z = -155f
+      traffic[3].z = -15f
+      trainZ = 65f
       completionFired = false
       outOfFuelFired = false
       clearInputs()
@@ -100,7 +149,6 @@ class TruckSimulationEngine {
 
     synchronized(stateLock) {
       if (!isRunning) {
-        // Gentle idle camera centering in menu/pause
         cameraX += (truckX * 0.45f - cameraX) * min(1f, dt * 3f)
         return
       }
@@ -120,25 +168,37 @@ class TruckSimulationEngine {
         speedKmh = max(0f, speedKmh - 55f * dt)
       }
 
-      // Steer left moves truck toward -X (screen left), steer right toward +X (screen right)
       val targetSteer = (if (right) 1f else 0f) - (if (left) 1f else 0f)
       steerInput += (targetSteer - steerInput) * min(1f, dt * 10f)
 
       truckX += steerInput * speedKmh * 0.018f * dt * 12f
       truckX = truckX.coerceIn(-4.3f, 4.3f)
 
-      // World scrolls backward (+Z toward camera) as truck drives forward (-Z)
       val worldDelta = speedKmh * 0.55f * dt
       worldScrollZ = (worldScrollZ + worldDelta) % 240f
       wheelSpinRadians = (wheelSpinRadians + worldDelta * 1.4f) % (2f * PI.toFloat())
 
-      // Arcade distance scale matching the prototype (25 km ~ 45s at top speed)
+      // Update traffic cars relative to truck's moving highway frame
+      for (i in traffic.indices) {
+        val car = traffic[i]
+        car.z += worldDelta + car.dirSign * (3f + speedKmh * 0.025f) * dt
+        if (car.z > 45f) {
+          car.z = -170f - i * 18f
+        } else if (car.z < -190f) {
+          car.z = 45f + i * 15f
+        }
+      }
+
+      // Update parallel railway train moving along -Z
+      trainZ += worldDelta - 7f * dt
+      if (trainZ < -230f) {
+        trainZ = 230f
+      } else if (trainZ > 235f) {
+        trainZ = -225f
+      }
+
       travelledKm += (speedKmh / 3600f) * dt * 18f
-
-      // Fuel consumption tuned so 100% tank comfortably finishes longest 125km route
       fuelPercent = max(0f, fuelPercent - speedKmh * 0.0028f * dt)
-
-      // Smooth chase camera lateral tracking
       cameraX += (truckX * 0.45f - cameraX) * min(1f, dt * 3.5f)
 
       if (travelledKm >= targetDistanceKm && !completionFired) {
@@ -170,7 +230,7 @@ class TruckSimulationEngine {
 
   private fun emitTelemetry(force: Boolean) {
     val now = System.nanoTime()
-    if (!force && now - lastHudEmitNs < 50_000_000L) return // ~20 Hz HUD refresh
+    if (!force && now - lastHudEmitNs < 50_000_000L) return
     lastHudEmitNs = now
     val snap = TelemetrySnapshot(
       speedKmh = speedKmh,
